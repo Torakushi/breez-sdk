@@ -27,7 +27,8 @@ import {
     openChannelFee,
     receivePayment,
     setLogStream,
-    signMessage
+    signMessage,
+    LogLevel
 } from "@breeztech/react-native-breez-sdk"
 import BuildConfig from "react-native-build-config"
 import { generateMnemonic } from "@dreson4/react-native-quick-bip39"
@@ -65,6 +66,12 @@ const App = () => {
         addLine("event", JSON.stringify(breezEvent))
     }
 
+    const nodeLogger = (logMessage) => {
+        if (logMessage.level != LogLevel.TRACE) {
+            console.log(`local_logger: [${logMessage.level}]: ${logMessage.message}`)
+        }
+    }
+
     React.useEffect(() => {
         const asyncFn = async () => {
             try {
@@ -88,7 +95,8 @@ const App = () => {
                 const config = await defaultConfig(EnvironmentType.PRODUCTION, BuildConfig.BREEZ_API_KEY, nodeConfig)
                 addLine("defaultConfig", JSON.stringify(config))
 
-                await connect(config, seed, eventHandler)
+                // connect will create a log file in the same repository as SQLLite.
+                await connect(config, seed, eventHandler, nodeLogger, config.workingDir +"/log.txt")
                 addLine("connect", null)
 
                 const nodeState = await nodeInfo()

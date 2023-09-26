@@ -33,10 +33,10 @@ use crate::models::{Config, LogEntry, NodeState, Payment, SwapInfo};
 use crate::{
     BackupStatus, BuyBitcoinRequest, BuyBitcoinResponse, CheckMessageRequest, CheckMessageResponse,
     EnvironmentType, ListPaymentsRequest, LnUrlCallbackStatus, LnUrlWithdrawResult, NodeConfig,
-    OpenChannelFeeRequest, OpenChannelFeeResponse, ReceiveOnchainRequest, ReceivePaymentRequest,
-    ReceivePaymentResponse, ReverseSwapFeesRequest, ReverseSwapInfo, ReverseSwapPairInfo,
-    SignMessageRequest, SignMessageResponse, StaticBackupRequest, StaticBackupResponse,
-    SweepRequest, SweepResponse,
+    NopLogger, OpenChannelFeeRequest, OpenChannelFeeResponse, ReceiveOnchainRequest,
+    ReceivePaymentRequest, ReceivePaymentResponse, ReverseSwapFeesRequest, ReverseSwapInfo,
+    ReverseSwapPairInfo, SignMessageRequest, SignMessageResponse, StaticBackupRequest,
+    StaticBackupResponse, SweepRequest, SweepResponse,
 };
 
 /*
@@ -58,7 +58,13 @@ pub fn connect(config: Config, seed: Vec<u8>) -> Result<()> {
         match *locked {
             None => {
                 let breez_services =
-                    BreezServices::connect(config, seed, Box::new(BindingEventListener {})).await?;
+                // TODO
+                    BreezServices::connect(
+                config, seed,
+                Box::new(BindingEventListener {}),
+                Box::new(NopLogger{}),
+                None,
+            ).await?;
 
                 *locked = Some(breez_services);
                 Ok(())

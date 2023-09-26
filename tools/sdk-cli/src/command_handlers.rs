@@ -4,10 +4,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Error, Result};
 use breez_sdk_core::InputType::{LnUrlAuth, LnUrlPay, LnUrlWithdraw};
 use breez_sdk_core::{
-    parse, BreezEvent, BreezServices, BuyBitcoinRequest, CheckMessageRequest, EventListener,
-    GreenlightCredentials, ListPaymentsRequest, PaymentTypeFilter, ReceiveOnchainRequest,
-    ReceivePaymentRequest, ReverseSwapFeesRequest, SignMessageRequest, StaticBackupRequest,
-    SweepRequest,
+    parse, BreezEvent, BreezServices, BuyBitcoinRequest, CheckMessageRequest, ClassicLogger,
+    EventListener, GreenlightCredentials, ListPaymentsRequest, PaymentTypeFilter,
+    ReceiveOnchainRequest, ReceivePaymentRequest, ReverseSwapFeesRequest, SignMessageRequest,
+    StaticBackupRequest, SweepRequest,
 };
 use breez_sdk_core::{Config, GreenlightNodeConfig, NodeConfig};
 use once_cell::sync::OnceCell;
@@ -44,8 +44,16 @@ impl EventListener for CliEventListener {
 }
 
 async fn connect(config: Config, seed: &[u8]) -> Result<()> {
-    let service =
-        BreezServices::connect(config, seed.to_vec(), Box::new(CliEventListener {})).await?;
+    // There is no point to create a specific logger for the node
+    // as only one BreezServices can be created.
+    let service = BreezServices::connect(
+        config,
+        seed.to_vec(),
+        Box::new(CliEventListener {}),
+        Box::new(ClassicLogger {}),
+        None,
+    )
+    .await?;
 
     BREEZ_SERVICES
         .set(service)
@@ -333,7 +341,7 @@ pub(crate) async fn handle_command(
                     let user_input_min_sat = 2001;
 
                     if user_input_max_sat < user_input_min_sat {
-                        error!("The LNURLw endpoint needs to accept at least {} sats, but min / max withdrawable are {} sat / {} sat",
+                        info!("The LNURLw endpoint needs to accept at least {} sats, but min / max withdrawable are {} sat / {} sat",
                 user_input_min_sat,
                 wd.min_withdrawable / 1000,
                 wd.max_withdrawable / 1000

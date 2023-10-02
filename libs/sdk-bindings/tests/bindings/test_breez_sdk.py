@@ -7,7 +7,7 @@ class SDKListener(breez_sdk.EventListener):
 
 class SDKNodeLogger(breez_sdk.Logger):
    def log(self, logMessage):
-      print(logMessage.message)
+      print(f"node_log: {logMessage.message}")
 
 def test():
      seed = breez_sdk.mnemonic_to_seed("cruise clever syrup coil cute execute laundry general cover prevent law sheriff");

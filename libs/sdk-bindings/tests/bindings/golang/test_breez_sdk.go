@@ -23,7 +23,7 @@ type BreezNodeLogger struct{}
 
 func (BreezNodeLogger) Log(l breez_sdk.LogMessage) {
 	if l.Level != breez_sdk.LogLevelTrace {
-		fmt.Printf("%v\n", l.Line)
+		fmt.Printf("node_log: %v\n", l.Message)
 	}
 }
 

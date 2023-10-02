@@ -64,6 +64,7 @@ impl Greenlight {
     /// or invite code
     /// If the node is already registered and an existing credentials were found, it will try to
     /// connect to the node using these credentials.
+    #[tracing::instrument(skip_all, fields(seed = hex::encode(seed.clone())))]
     pub async fn connect(
         config: Config,
         seed: Vec<u8>,

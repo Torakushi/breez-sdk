@@ -1,8 +1,16 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use log::{Level, LevelFilter, Metadata, Record};
+use log::{Level, LevelFilter, Metadata, Record, Log};
 use once_cell::sync::{Lazy, OnceCell};
+use tracing::field;
+use tracing::field::Visit;
+use tracing::Subscriber;
+use tracing_log::LogTracer;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Layer;
 
 use breez_sdk_core::{
     error::*, mnemonic_to_seed as sdk_mnemonic_to_seed, parse as sdk_parse_input,
@@ -27,15 +35,176 @@ use breez_sdk_core::{
 static RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
 static LOG_INIT: OnceCell<bool> = OnceCell::new();
 
+lazy_static::lazy_static! {
+    static ref LOCAL_LOGGERS: Arc<RwLock<HashMap<String, Arc<Box<dyn Logger>>>>> = Arc::new(RwLock::new(HashMap::new()));
+}
+
 struct BindingLogger {
     log_stream: Box<dyn LogStream>,
 }
 
 impl BindingLogger {
     fn init(log_stream: Box<dyn LogStream>) {
-        let binding_logger = BindingLogger { log_stream };
+        let binding_logger = BindingLogger {log_stream:  log_stream };
         log::set_boxed_logger(Box::new(binding_logger)).unwrap();
         log::set_max_level(LevelFilter::Trace);
+    }
+}
+
+pub struct CustomLayer {
+    global_logger: Box<dyn log::Log>,
+    local_loggers: Arc<RwLock<HashMap<String, Arc<Box<(dyn Logger)>>>>>,
+}
+
+impl CustomLayer {
+    fn new() -> CustomLayer {
+        CustomLayer {
+            global_logger: Box::new(log::logger()),
+            local_loggers: LOCAL_LOGGERS.clone(),
+        }
+    }
+
+    fn set_global_logger(&mut self, global_logger: Box<dyn log::Log>){
+        self.global_logger = global_logger
+    }
+}
+
+#[derive(Debug)]
+struct CustomFieldStorage(HashMap<String, String>);
+impl<S> Layer<S> for CustomLayer
+where
+    S: Subscriber,
+    S: for<'lookup> LookupSpan<'lookup>,
+{
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        println!("{:?}", id);
+        let span = ctx.span(id).unwrap();
+        let mut fields = HashMap::new();
+        let mut visitor = CustomVisitor(&mut fields);
+        attrs.record(&mut visitor);
+        let storage = CustomFieldStorage(fields);
+        let mut extensions = span.extensions_mut();
+        extensions.insert(storage);
+    }
+
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let mut h = HashMap::new();
+        let visitor: &mut dyn field::Visit = &mut CustomVisitor(&mut h);
+        event.record(visitor);
+
+        // If we have a span context, then it means that the log was emited from a special
+        // SDK instances. We map to the right logger.
+        let mut seed: Option<String> = None;
+        if let Some(scope) = ctx.event_scope(event) {
+            for span in scope.from_root() {
+                if let Some(extension) = span.extensions().get::<CustomFieldStorage>() {
+                    seed = extension.0.get("seed").cloned();
+                    break;
+                }
+            }
+        }
+
+        let mut h = HashMap::new();
+        let visitor: &mut dyn field::Visit = &mut CustomVisitor(&mut h);
+        event.record(visitor);
+
+
+
+        if let Some(seed) = seed {
+            // We got a seed. It should belong to one of our local logger
+            if let Some(logger) = self.local_loggers.read().unwrap().get(&seed){
+                logger.log(convert_to_log_message(&h));
+                return;
+            }
+        }
+
+        let empty_string: String = "".to_string();
+
+        let metadata = Metadata::builder()
+            .target(h.get("log.target").unwrap_or(&empty_string))
+            .level(Level::Info)
+            .build();
+
+
+        let line = h.get("log.line").and_then(|s| s.parse().ok());
+        let file: &String = h.get("log.file").unwrap_or(&empty_string);
+        let module_path = h.get("log.module_path").unwrap_or(&empty_string);
+
+        self.global_logger.log(&Record::builder()
+        .metadata(metadata)
+        .args(format_args!("{}", h.get("message").unwrap_or(&empty_string)))
+        .line(line)
+        .file(Some(file))
+        .module_path(Some(module_path))
+        .build());
+
+
+
+        }
+
+        }
+
+struct CustomVisitor<'a>(&'a mut HashMap<String, String>);
+
+impl<'a> Visit for CustomVisitor<'a> {
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_error(
+        &mut self,
+        field: &tracing::field::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .insert(field.name().to_string(), format!("{:?}", value));
+    }
+}
+
+fn convert_to_log_message(data: &HashMap<String, String>) -> LogMessage {
+    LogMessage {
+        level: LogLevel::Info,
+        message: data
+            .get("message")
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        module_path: data
+            .get("log.module_path")
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        file: data
+            .get("log.file")
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        line: data
+            .get("log.line")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_default(),
     }
 }
 
@@ -84,20 +253,53 @@ pub fn static_backup(request: StaticBackupRequest) -> SdkResult<StaticBackupResp
 /// * `node_logger` - Local logger for the node
 /// * `log_file_path` - an optional file path in which to write node logs
 ///
-pub fn connect(
-    config: Config,
-    seed: Vec<u8>,
-    event_listener: Box<dyn EventListener>,
-    node_logger: Box<dyn Logger>,
-    log_file_path: Option<String>,
-) -> SdkResult<Arc<BlockingBreezServices>> {
-    rt().block_on(async move {
-        let breez_services =
-            BreezServices::connect(config, seed, event_listener, node_logger, log_file_path)
-                .await?;
+    pub fn connect(
+        config: Config,
+        seed: Vec<u8>,
+        event_listener: Box<dyn EventListener>,
+        node_logger: Box<dyn Logger>,
+        log_file_path: Option<String>,
+    ) -> SdkResult<Arc<BlockingBreezServices>> {
+        let node_logger = Arc::new(node_logger);
 
-        Ok(Arc::new(BlockingBreezServices { breez_services }))
-    })
+
+        rt().block_on(async move {
+            add_local_logger(hex::encode(seed.clone()), node_logger.clone() );
+
+            let breez_services =
+                BreezServices::connect(config, seed, event_listener, node_logger , log_file_path)
+                    .await?;
+
+            Ok(Arc::new(BlockingBreezServices { breez_services }))
+        })
+}
+
+struct TestToRemoveLogger;
+
+impl Logger for TestToRemoveLogger{
+    fn log(&self, log_message: LogMessage) {
+        println!("My_fake_second_logger: {}", log_message.message)
+    }
+}
+
+fn add_local_logger(seed: String, logger: Arc<Box<dyn Logger>>) {
+    // Acquire a write lock on LOCAL_LOGGERS and insert the logger.
+    // TODO: check if seed already exists
+    LOCAL_LOGGERS.write().unwrap().insert(seed.clone(), logger);
+    println!("logger added {}", seed.clone());
+}
+
+pub struct NOOO;
+impl LogStream for NOOO {
+    fn log(&self, l: LogEntry){
+        println!("{}", l.line)
+    }
+}
+
+impl Logger for NOOO {
+    fn log(&self, l: LogMessage){
+        println!("NOOO, local_node_logger: {}", l.message)
+    }
 }
 
 /// If used, this must be called before `connect`
@@ -105,7 +307,16 @@ pub fn set_log_stream(log_stream: Box<dyn LogStream>) -> Result<()> {
     LOG_INIT
         .set(true)
         .map_err(|_| anyhow!("log stream already created"))?;
-    BindingLogger::init(log_stream);
+
+
+    let mut layer = CustomLayer::new();
+    layer.set_global_logger(Box::new(BindingLogger{log_stream}));
+
+    let sub = tracing_subscriber::registry().with(layer);
+
+    tracing::subscriber::set_global_default(sub).unwrap();
+    LogTracer::init().unwrap();
+
     Ok(())
 }
 

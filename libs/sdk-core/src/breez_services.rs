@@ -178,7 +178,7 @@ impl BreezServices {
         config: Config,
         seed: Vec<u8>,
         event_listener: Box<dyn EventListener>,
-        node_logger: Box<dyn Logger>,
+        node_logger: Arc<Box<dyn Logger>>,
         log_file_path: Option<String>,
     ) -> SdkResult<Arc<BreezServices>> {
         let start = Instant::now();
@@ -1430,7 +1430,7 @@ impl BreezServicesBuilder {
     pub async fn build(
         &self,
         event_listener: Option<Box<dyn EventListener>>,
-        node_logger: Box<dyn Logger>,
+        node_logger: Arc<Box<dyn Logger>>,
         log_file_path: Option<String>,
     ) -> SdkResult<Arc<BreezServices>> {
         if self.node_api.is_none() && self.seed.is_none() {
@@ -1440,13 +1440,13 @@ impl BreezServicesBuilder {
         }
         // Create the logger that the node will use. It will be a multilogger containing
         // an app_logger and a file logger is the user provided a file_path.
-        let mut loggers: Vec<Box<dyn Logger>> = vec![node_logger];
+        let mut loggers: Vec<Arc<Box<dyn Logger>>> = vec![node_logger];
 
         if let Some(file_path) = log_file_path.clone() {
             let file_path_str: &str = &file_path;
 
             match FileSystemLogger::new(file_path_str, LogLevel::Trace) {
-                Ok(file_logger) => loggers.push(Box::new(file_logger) as Box<dyn Logger>),
+                Ok(file_logger) => loggers.push(Arc::new(Box::new(file_logger) as Box<dyn Logger>)),
                 Err(err) => {
                     return Err(SdkError::InitFailed {
                         err: format!("Failed to create FileSystemLogger: {:?}", err),
@@ -2093,7 +2093,7 @@ pub(crate) mod tests {
             .node_api(node_api)
             .persister(persister)
             .backup_transport(Arc::new(MockBackupTransport::new()))
-            .build(None, Box::new(NopLogger {}), None)
+            .build(None, Arc::new(Box::new(NopLogger {})), None)
             .await?;
 
         breez_services.sync().await?;
@@ -2280,7 +2280,7 @@ pub(crate) mod tests {
             .persister(persister)
             .node_api(node_api)
             .backup_transport(Arc::new(MockBackupTransport::new()))
-            .build(None, Box::new(NopLogger {}), None)
+            .build(None, Arc::new(Box::new(NopLogger {})), None)
             .await?;
 
         Ok(breez_services)

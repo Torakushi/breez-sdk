@@ -139,13 +139,14 @@ impl Logger for FileSystemLogger {
     }
 }
 
+
 /// MultiLogger implements Logger trait and can contain various loggers.
 pub struct MultiLogger {
-    loggers: Vec<Box<dyn Logger>>,
+    loggers: Vec<Arc<Box<dyn Logger>>>,
 }
 
 impl MultiLogger {
-    pub fn new(loggers: Vec<Box<dyn Logger>>) -> MultiLogger {
+    pub fn new(loggers: Vec<Arc<Box<dyn Logger>>>) -> MultiLogger {
         MultiLogger { loggers }
     }
 }

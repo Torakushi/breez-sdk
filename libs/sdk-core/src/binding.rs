@@ -62,7 +62,7 @@ pub fn connect(config: Config, seed: Vec<u8>, log_file_path: Option<String>) -> 
                     config,
                     seed,
                     Box::new(BindingEventListener {}),
-                    Box::new(BindingNodeLogger {}),
+                    Arc::new(Box::new(BindingNodeLogger {})),
                     log_file_path,
                 )
                 .await?;

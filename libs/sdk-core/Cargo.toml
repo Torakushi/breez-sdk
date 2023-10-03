@@ -8,6 +8,7 @@ name = "breez_sdk_core"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [dependencies]
+tracing="*"
 flutter_rust_bridge = "1.75.2"
 aes = "0.8"
 anyhow = { version = "1.0", features = ["backtrace"] }

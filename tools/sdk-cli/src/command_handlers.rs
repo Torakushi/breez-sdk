@@ -50,7 +50,7 @@ async fn connect(config: Config, seed: &[u8]) -> Result<()> {
         config,
         seed.to_vec(),
         Box::new(CliEventListener {}),
-        Box::new(ClassicLogger {}),
+        Arc::new(Box::new(ClassicLogger {})),
         None,
     )
     .await?;
